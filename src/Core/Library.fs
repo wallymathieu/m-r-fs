@@ -216,10 +216,9 @@ module WriteModel=
   type InventoryCommandHandlers(session:ISession, now: unit->DateTimeOffset)=
     let sessionPutNextAndEvents applied =
       let timestamp = now()
-      let evtWithTime = Event.create timestamp
       let (next,evts)=applied
-      let evtC = evtWithTime next
-      session.Put (next,List.map evtC evts)
+      let toFullEvent = Event.create timestamp next
+      session.Put (next,List.map toFullEvent evts)
     let handle (message:Command) =
       /// try to fetch item from session
       /// the "apply" use the item to yield the next entity value and events
