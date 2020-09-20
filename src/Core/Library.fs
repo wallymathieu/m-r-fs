@@ -1,12 +1,14 @@
 ﻿namespace Core
 open System
+open FSharpPlus
+open FSharpPlus.Data
 type IMessage=interface end
 
 type IQuery<'Result>=inherit IMessage 
 type ICommand=inherit IMessage
 
-type IHandler<'TMessage when 'TMessage :> IMessage>=
-  abstract Handle: 'TMessage->Async<unit>
+type IHandler<'TMessage,'TError when 'TMessage :> IMessage>=
+  abstract Handle: 'TMessage->Async<'TError>
 
 type IEvent =
   inherit IMessage
@@ -14,8 +16,8 @@ type IEvent =
   abstract Version:int
   abstract TimeStamp: DateTimeOffset
 
-type IEventHandler<'TEvent when 'TEvent :> IEvent>=
-  inherit IHandler<'TEvent>
+type IEventHandler<'TEvent,'TError when 'TEvent :> IEvent>=
+  inherit IHandler<'TEvent,'TError>
 
 type IEventPublisher=
   abstract Publish<'TEvent when 'TEvent:> IEvent> : 'TEvent->Async<unit>
@@ -24,10 +26,8 @@ type IEventStore=
   abstract Save: IEvent seq -> Async<unit>
   abstract Get: id:Guid * fromVersion:(int option) -> IEvent seq
 
-type ICommandHandler<'TCommand when 'TCommand :> ICommand>=
-  inherit IHandler<'TCommand>
-
-
+type ICommandHandler<'TCommand,'TError when 'TCommand :> ICommand>=
+  inherit IHandler<'TCommand,'TError>
 
 type IAggregateRoot=
   abstract Id:Guid
@@ -119,7 +119,7 @@ module ReadModel=
       | _ -> raise <| InvalidOperationException "did not find the original inventory this shouldnt happen"
 
   type InventoryItemDetailView(db:InMemoryDatabase)=
-    interface IEventHandler<Event> with
+    interface IEventHandler<Event,unit> with
       member __.Handle(message)=async{
         match message.T with
           | InventoryItemCreated p->
@@ -140,7 +140,7 @@ module ReadModel=
       return db.TryGetDetail message.Id
     }
   type InventoryListView(db:InMemoryDatabase)=
-    interface IEventHandler<Event> with
+    interface IEventHandler<Event,unit> with
       member __.Handle(message)=async{
         match message.T with
           | InventoryItemCreated p->
@@ -173,7 +173,12 @@ module WriteModel=
     T:CommandT
   }
   with interface ICommand
-
+  type ErrorT=
+  |MissingItem
+  |MissingName
+  |CantRemoveNegativeCountFromInventory
+  |MustHaveACountGreaterThan0ToAddToInventory
+  |AlreadyDeactivated
   type InventoryItem={
     Id:Guid
     Version:int
@@ -185,65 +190,66 @@ module WriteModel=
       member x.Version=x.Version
     static member Create(id:Guid, name:string)=
       let item : InventoryItem = {Id=id; Activated=false; Version=0}
-      let evt = InventoryItemCreated { Name = name }
-      item,[evt]
+      item,[InventoryItemCreated { Name = name }]
+    
     member this.ChangeName(newName:string)=
       if String.IsNullOrEmpty(newName) then
-        raise <| ArgumentException"newName"
-      let evt = InventoryItemRenamed { NewName=newName }
-      this, [evt]
+        Error MissingName
+      else
+        Ok (this, [InventoryItemRenamed { NewName=newName }])
     member this.Remove(count:int)=
       if count <=0 then
-        raise <| InvalidOperationException "cant remove negative count from inventory"
-      let evt = ItemsRemovedFromInventory { Count=count }
-      this, [evt]
+        Error CantRemoveNegativeCountFromInventory
+      else
+        Ok (this, [ItemsRemovedFromInventory { Count=count }])
     member this.CheckIn(count:int)=
       if count <=0 then
-        raise <| InvalidOperationException "must have a count greater than 0 to add to inventory"
-      let evt = ItemsCheckedInToInventory { Count=count }
-      this, [evt]
+        Error MustHaveACountGreaterThan0ToAddToInventory
+      else
+        Ok (this, [ItemsCheckedInToInventory { Count=count }])
     member this.Deactivate()=
       if not this.Activated then
-        raise <| InvalidOperationException "already deactivated"
-      let evt = InventoryItemDeactivated
-      { this with Activated = false }, [evt]
+        Error AlreadyDeactivated
+      else
+        Ok ({ this with Activated = false }, [InventoryItemDeactivated])
 
   type InventoryCommandHandlers(session:ISession, now: unit->DateTimeOffset)=
-    let putNextAndEvents applied =
+    let sessionPutNextAndEvents applied =
       let timestamp = now()
       let evtWithTime = Event.create timestamp
       let (next,evts)=applied
       let evtC = evtWithTime next
       session.Put (next,List.map evtC evts)
+    let handle (message:Command) =
+      /// try to fetch item from session
+      /// the "apply" use the item to yield the next entity value and events
+      let sessionItemOver apply=async{
+        match! session.Get<InventoryItem>(message.Id,Some message.ExpectedVersion) with
+        | Some (item:InventoryItem)->
+          match apply item with
+          | Ok next_evts->
+            do! sessionPutNextAndEvents next_evts
+            do! session.Commit ()
+            return Ok ()
+          | Error e-> return Error e
+        | None -> 
+          return Error MissingItem }
 
-    interface ICommandHandler<Command> with
-      member __.Handle (message)=async {
+      async {
         match message.T with
         | CheckInItemsToInventory p ->
-          match! session.Get<InventoryItem>(message.Id,Some message.ExpectedVersion) with
-          | Some item->
-            do! putNextAndEvents <| item.CheckIn (p.Count) 
-            do! session.Commit ()
-          | None -> ()
+          return! sessionItemOver (fun item->item.CheckIn (p.Count))
         | CreateInventoryItem p ->
-          do! putNextAndEvents <| InventoryItem.Create(message.Id, p.Name)
+          do! sessionPutNextAndEvents (InventoryItem.Create(message.Id, p.Name))
           do! session.Commit()
+          return Ok()
         | DeactivateInventoryItem ->
-          match! session.Get<InventoryItem>(message.Id,Some message.ExpectedVersion) with
-          | Some item->
-            do! putNextAndEvents <| item.Deactivate () 
-            do! session.Commit ()
-          | None -> ()
+          return! sessionItemOver (fun item->item.Deactivate ())
         | RemoveItemsFromInventory p ->
-          match! session.Get<InventoryItem>(message.Id,Some message.ExpectedVersion) with
-          | Some item->
-            do! putNextAndEvents <| item.Remove (p.Count) 
-            do! session.Commit ()
-          | None -> ()
+          return! sessionItemOver (fun item->item.Remove (p.Count))
         | RenameInventoryItem p ->
-          match! session.Get<InventoryItem>(message.Id,Some message.ExpectedVersion) with
-          | Some item->
-            do! putNextAndEvents <| item.ChangeName (p.NewName)
-            do! session.Commit ()
-          | None -> ()
+          return! sessionItemOver (fun item->item.ChangeName (p.NewName))
       }
+
+    interface ICommandHandler<Command,Result<unit,ErrorT>> with
+      member __.Handle (message)= handle message
