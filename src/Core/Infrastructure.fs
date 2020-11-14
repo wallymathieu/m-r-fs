@@ -13,7 +13,7 @@ type ICommand =
   inherit IMessage
 
 type IHandler<'TMessage, 'TError when 'TMessage :> IMessage> =
-  abstract Handle: 'TMessage -> Async<'TError>
+  abstract Handle: 'TMessage -> Async<Result<unit,'TError>>
 
 type IEvent =
   inherit IMessage
@@ -43,3 +43,13 @@ type ISession =
 
   abstract Get<'T when 'T :> IAggregateRoot> : aggregateId:Guid * expectedVersion:int option -> Async<'T option>
   abstract Commit: unit -> Async<unit>
+
+(*type IRepository=
+  abstract Save<'T when 'T :> IAggregateRoot> : aggregate:'T * expectedVersion:int option -> Async<unit>
+  abstract Get<'T when 'T :> IAggregateRoot> : aggregateId:Guid -> Async<'T option>
+
+type Session(repo:IRepository)=
+  interface ISession with
+    member __.Put(aggregate,events)=async.Return ()
+    member __.Get(aggregate,events)=async.Return ()
+    *)

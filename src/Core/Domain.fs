@@ -99,6 +99,7 @@ module ReadModel =
                                              CurrentCount = item.CurrentCount + p.Count
                                              Version = message.Version }
           | InventoryItemDeactivated -> db.Details.Remove message.Id |> ignore
+          return Ok ()
         }
 
     member __.Handle (message: GetInventoryItemDetails): Async<InventoryItemDetailsDto option> =
@@ -120,6 +121,7 @@ module ReadModel =
           | InventoryItemDeactivated ->
               db.List.RemoveAll (fun x -> x.Id = message.Id)
               |> ignore
+          return Ok ()
         }
 
     member __.Handle (_: GetInventoryItems): Async<InventoryItemListDto list> = async { return db.List |> Seq.toList }
@@ -218,5 +220,5 @@ module WriteModel =
         | RenameInventoryItem p -> return! sessionItemOver (fun item -> item.ChangeName (p.NewName))
       }
 
-    interface ICommandHandler<Command, Result<unit, ErrorT>> with
+    interface ICommandHandler<Command, ErrorT> with
       member __.Handle (message) = handle message
