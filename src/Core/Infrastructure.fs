@@ -24,9 +24,14 @@ type IEvent =
   abstract Version: int
   abstract TimeStamp: DateTimeOffset
 
-/// An event handler is supposed to listen to events
+/// An event handler is supposed to handle events
 type IEventHandler<'TEvent, 'TError when 'TEvent :> IEvent> =
   inherit IHandler<'TEvent, unit, 'TError>
+
+/// An event listener is supposed to a passive listener for events
+type IEventListener<'TEvent when 'TEvent :> IEvent> =
+  inherit IHandler<'TEvent, unit, unit>
+
 
 type IEventPublisher =
   abstract Publish<'TEvent when 'TEvent :> IEvent> : 'TEvent -> Async<unit>
