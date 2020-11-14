@@ -99,6 +99,7 @@ module ReadModel =
                                              CurrentCount = item.CurrentCount + p.Count
                                              Version = message.Version }
           | InventoryItemDeactivated -> db.Details.Remove message.Id |> ignore
+
           return Ok ()
         }
 
@@ -121,6 +122,7 @@ module ReadModel =
           | InventoryItemDeactivated ->
               db.List.RemoveAll (fun x -> x.Id = message.Id)
               |> ignore
+
           return Ok ()
         }
 
