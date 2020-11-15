@@ -30,7 +30,8 @@ type Startup(configuration: IConfiguration) =
                 .AddSingleton<IQueryHandler<GetInventoryItems,InventoryItemListDto list>,InventoryListView>()
                 .AddSingleton<InMemoryDatabase>()
                 .AddSingleton<ICommandHandler>(registerInventoryCommandHandlers)
-                .AddSingleton<ISession,FakeSession>()
+                .AddSingleton<ISession, FakeSession<Event>>()
+                .AddSingleton<IEventStore<Event>, FakeEventStore<Event>>()
                 |> SwaggerConfig.configureServices
                 |> ignore
     

@@ -144,8 +144,8 @@ module WriteModel =
     | MustHaveACountGreaterThan0ToAddToInventory
     | AlreadyDeactivated
   /// ICommandHandler for the domain (i.e. known types of commands and errors)
-  type ICommandHandler = interface inherit ICommandHandler<Command,ErrorT> end
-  type ISession = interface inherit ISession<Event> end
+  type ICommandHandler = ICommandHandler<Command,ErrorT>
+  type ISession = ISession<Event>
   type InventoryItem =
     { Id: Guid
       Version: int
