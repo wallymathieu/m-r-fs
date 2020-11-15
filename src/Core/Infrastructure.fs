@@ -123,3 +123,9 @@ type FakeEventStore<'TEvent when 'TEvent :> IEvent>(publisher:IEventPublisher<'T
     member __.Get(id)=
       Dict.tryGetValue id current |> Option.map (fun evts-> upcast evts)
     
+type FakeEventPublisher<'TEvent when 'TEvent :> IEvent>(listeners : IEventListener<'TEvent> seq)=
+  interface IEventPublisher<'TEvent> with
+    member __.Publish(event)=async{
+      for listener in listeners do
+        do! listener.Handle event
+    }

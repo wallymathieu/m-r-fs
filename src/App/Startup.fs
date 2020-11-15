@@ -26,12 +26,18 @@ type Startup(configuration: IConfiguration) =
     member _.ConfigureServices(services: IServiceCollection) =
         // Add framework services.
         services.AddControllers() |> ignore
-        services.AddSingleton<IQueryHandler<GetInventoryItemDetails,InventoryItemDetailsDto>,InventoryItemDetailView>() 
-                .AddSingleton<IQueryHandler<GetInventoryItems,InventoryItemListDto list>,InventoryListView>()
+        services
+                .AddSingleton<InventoryItemDetailView>()
+                .AddSingleton<InventoryListView>()
+                .AddSingleton<IQueryHandler<GetInventoryItemDetails,InventoryItemDetailsDto>>(fun di->di.GetRequiredService<InventoryItemDetailView>() :> IQueryHandler<GetInventoryItemDetails,InventoryItemDetailsDto>)
+                .AddSingleton<IQueryHandler<GetInventoryItems,InventoryItemListDto list>>(fun di->di.GetRequiredService<InventoryListView>() :> IQueryHandler<GetInventoryItems,InventoryItemListDto list>)
                 .AddSingleton<InMemoryDatabase>()
                 .AddSingleton<ICommandHandler>(registerInventoryCommandHandlers)
                 .AddSingleton<ISession, FakeSession<Event>>()
                 .AddSingleton<IEventStore<Event>, FakeEventStore<Event>>()
+                .AddSingleton<IEventPublisher<Event>, FakeEventPublisher<Event>>()
+                .AddSingleton<IEventListener<Event>>(fun di->di.GetRequiredService<InventoryItemDetailView>() :> IEventListener<Event>)
+                .AddSingleton<IEventListener<Event>>(fun di->di.GetRequiredService<InventoryListView>() :> IEventListener<Event>)
                 |> SwaggerConfig.configureServices
                 |> ignore
     
