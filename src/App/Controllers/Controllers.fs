@@ -8,7 +8,7 @@ open Microsoft.AspNetCore.Mvc
 
 type ControllerBase with
     /// interpret query result as Http response (i.e. IActionResult)
-    member self.InterpretQueryResult<'TQueryResult> (qr:Result<'TQueryResult,unit>) : IActionResult = match qr with | Ok v-> upcast ( self.Ok v ) | Error () -> upcast ( self.NotFound() )
+    member self.InterpretQueryResult<'TQueryResult> (qr:'TQueryResult option) : IActionResult = match qr with | Some v-> upcast ( self.Ok v ) | None -> upcast ( self.NotFound() )
     /// we want to bind the query result into an interpretation of that result  (.i.e Async<IActionResult>) and change Async to Task
     member self.BindReturnQueryInterpretationToTask value = value >>= (self.InterpretQueryResult >> async.Return) |> Async.StartAsTask // note the ceremony
     /// interpret command result as Http response (i.e. IActionResult)

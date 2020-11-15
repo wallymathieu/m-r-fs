@@ -82,7 +82,7 @@ type FakeSession<'TEvent when 'TEvent :> IEvent>(eventStore:IEventStore<'TEvent>
   interface ISession<'TEvent> with
       member __.Put(aggregate,events)=async{
         do! eventStore.Save events
-        versions.Add((aggregate.Id,aggregate.Version),aggregate)
+        versions.[(aggregate.Id,aggregate.Version)] <- aggregate
         current.[aggregate.Id] <- aggregate
       }
       member __.Get<'T when 'T :> IAggregateRoot>(id,maybeVersion)=async{

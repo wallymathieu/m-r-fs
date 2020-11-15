@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Core\Core.fsproj" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="5.4.1" />
+    <PackageReference Include="FSharp.SystemTextJson" Version="0.14.8" />
   </ItemGroup>
 
 </Project>

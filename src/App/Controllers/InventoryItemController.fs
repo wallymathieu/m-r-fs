@@ -7,8 +7,6 @@ open FSharpPlus
 open Microsoft.AspNetCore.Mvc
 open Microsoft.Extensions.Logging
 open CQRSLite.Core.Infrastructure
-[<AutoOpen>]
-module Controllers=
 
 [<ApiController>]
 [<Route("[controller]")>]
@@ -19,8 +17,7 @@ type InventoryItemController (logger : ILogger<InventoryItemController>,
     inherit ControllerBase()
     [<HttpGet>]
     member self.Get() = getInventoryItems.Handle(GetInventoryItems()) |> self.BindReturnQueryInterpretationToTask
-        
-      
+
     [<HttpGet("{id}")>]
     member self.Get(id:Guid) = getInventoryItem.Handle({Id=id}) |> self.BindReturnQueryInterpretationToTask
 

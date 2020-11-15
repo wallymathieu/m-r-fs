@@ -3,6 +3,7 @@ namespace App
 open System
 open System.Collections.Generic
 open System.Linq
+open System.Text.Json.Serialization
 open System.Threading.Tasks
 open CQRSLite.Core.Domain.ReadModel
 open CQRSLite.Core.Domain.WriteModel
@@ -25,13 +26,15 @@ type Startup(configuration: IConfiguration) =
     // This method gets called by the runtime. Use this method to add services to the container.
     member _.ConfigureServices(services: IServiceCollection) =
         // Add framework services.
-        services.AddControllers() |> ignore
+        services.AddControllers()
+                .AddJsonOptions(fun options -> options.JsonSerializerOptions.Converters.Add(JsonFSharpConverter()))
+                |> ignore
         services
                 .AddSingleton<InventoryItemDetailView>()
                 .AddSingleton<InventoryListView>()
                 .AddSingleton<IQueryHandler<GetInventoryItemDetails,InventoryItemDetailsDto>>(fun di->di.GetRequiredService<InventoryItemDetailView>() :> IQueryHandler<GetInventoryItemDetails,InventoryItemDetailsDto>)
                 .AddSingleton<IQueryHandler<GetInventoryItems,InventoryItemListDto list>>(fun di->di.GetRequiredService<InventoryListView>() :> IQueryHandler<GetInventoryItems,InventoryItemListDto list>)
-                .AddSingleton<InMemoryDatabase>()
+                .AddSingleton<InMemoryDatabase>(InMemoryDatabase.Default())
                 .AddSingleton<ICommandHandler>(registerInventoryCommandHandlers)
                 .AddSingleton<ISession, FakeSession<Event>>()
                 .AddSingleton<IEventStore<Event>, FakeEventStore<Event>>()

@@ -66,7 +66,9 @@ module ReadModel =
     member db.GetDetail id =
       Dict.tryGetValue id db.Details 
       |> Option.defaultWith raiseCouldNotFindOriginalInventory
-  
+
+    static member Default ()={ Details= Dictionary<_, _>(); List= ResizeArray<_>() }
+
   type InventoryItemDetailView (db: InMemoryDatabase) =
     interface IEventListener<Event> with
       member __.Handle (message) =
@@ -162,7 +164,7 @@ module WriteModel =
       if String.IsNullOrEmpty (newName) then
         Error MissingName
       else
-        Ok (this, [ InventoryItemRenamed { NewName = newName } ])
+        Ok ({this with Version=this.Version+1}, [ InventoryItemRenamed { NewName = newName } ])
 
     member this.Remove (count: int) =
       if count <= 0 then
@@ -180,7 +182,7 @@ module WriteModel =
       if not this.Activated then
         Error AlreadyDeactivated
       else
-        Ok ({ this with Activated = false }, [ InventoryItemDeactivated ])
+        Ok ({ this with Activated = false; Version=this.Version+1 }, [ InventoryItemDeactivated ])
   type InventoryCommandHandlers (session: ISession, now: unit -> DateTimeOffset) =
     let sessionPutNextAndEvents applied =
       let timestamp = now ()
