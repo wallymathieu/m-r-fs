@@ -1,5 +1,5 @@
-﻿namespace Core
-
+﻿namespace CQRSLite.Core.Domain
+open CQRSLite.Core.Infrastructure
 open System
 open FSharpPlus
 open FSharpPlus.Data
@@ -37,96 +37,89 @@ module ReadModel =
     | ItemsRemovedFromInventory of WithCount
 
   type Event =
-    { Id: Guid
-      Version: int
-      TimeStamp: DateTimeOffset
+    { EntityId: Guid
+      EntityVersion: int
+      EventTimeStamp: DateTimeOffset
       T: EventsT }
     interface IEvent with
-      member e.Id = e.Id
-      member e.Version = e.Version
-      member e.TimeStamp = e.TimeStamp
+      member e.EntityId = e.EntityId
+      member e.EntityVersion = e.EntityVersion
+      member e.EventTimeStamp = e.EventTimeStamp
 
   module Event =
 
     let create (timestamp: DateTimeOffset) (item: #IAggregateRoot) (t: EventsT) =
-      { Id = item.Id
-        Version = item.Version
-        TimeStamp = timestamp
+      { EntityId = item.Id
+        EntityVersion = item.Version
+        EventTimeStamp = timestamp
         T = t }
 
   open System.Collections.Generic
-
+  let raiseCouldNotFindOriginalInventory ()=
+    raise <| InvalidOperationException "did not find the original inventory (this shouldnt happen)"
   type InMemoryDatabase =
     { Details: Dictionary<Guid, InventoryItemDetailsDto>
       List: ResizeArray<InventoryItemListDto> }
     member db.TryGetDetail id =
-      match db.Details.TryGetValue (id) with
-      | true, item -> Some item
-      | _ -> None
+      Dict.tryGetValue id db.Details 
 
     member db.GetDetail id =
-      match db.TryGetDetail id with
-      | Some item -> item
-      | _ ->
-          raise
-          <| InvalidOperationException "did not find the original inventory this shouldnt happen"
-
+      Dict.tryGetValue id db.Details 
+      |> Option.defaultWith raiseCouldNotFindOriginalInventory
+  
   type InventoryItemDetailView (db: InMemoryDatabase) =
-    interface IEventHandler<Event, unit> with
+    interface IEventListener<Event> with
       member __.Handle (message) =
         async {
           match message.T with
           | InventoryItemCreated p ->
               db.Details.Add
-                (message.Id,
-                 { Id = message.Id
+                (message.EntityId,
+                 { Id = message.EntityId
                    Name = p.Name
                    CurrentCount = 0
-                   Version = message.Version })
+                   Version = message.EntityVersion })
           | InventoryItemRenamed p ->
-              let item = db.GetDetail message.Id
-              db.Details.[message.Id] <- { item with
-                                             Name = p.NewName
-                                             Version = message.Version }
+              let item = db.GetDetail message.EntityId
+              db.Details.[message.EntityId] <- { item with
+                                                  Name = p.NewName
+                                                  Version = message.EntityVersion }
           | ItemsRemovedFromInventory p ->
-              let item = db.GetDetail message.Id
-              db.Details.[message.Id] <- { item with
-                                             CurrentCount = item.CurrentCount - p.Count
-                                             Version = message.Version }
+              let item = db.GetDetail message.EntityId
+              db.Details.[message.EntityId] <- { item with
+                                                  CurrentCount = item.CurrentCount - p.Count
+                                                  Version = message.EntityVersion }
           | ItemsCheckedInToInventory p ->
-              let item = db.GetDetail message.Id
-              db.Details.[message.Id] <- { item with
-                                             CurrentCount = item.CurrentCount + p.Count
-                                             Version = message.Version }
-          | InventoryItemDeactivated -> db.Details.Remove message.Id |> ignore
+              let item = db.GetDetail message.EntityId
+              db.Details.[message.EntityId] <- { item with
+                                                  CurrentCount = item.CurrentCount + p.Count
+                                                  Version = message.EntityVersion }
+          | InventoryItemDeactivated -> db.Details.Remove message.EntityId |> ignore
 
-          return Ok ()
         }
-
-    member __.Handle (message: GetInventoryItemDetails): Async<InventoryItemDetailsDto option> =
-      async { return db.TryGetDetail message.Id }
+    interface IQueryHandler<GetInventoryItemDetails,InventoryItemDetailsDto> with
+      member __.Handle (message: GetInventoryItemDetails): Async<InventoryItemDetailsDto option> =
+        async { return db.TryGetDetail message.Id }
 
   type InventoryListView (db: InMemoryDatabase) =
-    interface IEventHandler<Event, unit> with
+    interface IEventListener<Event> with
       member __.Handle (message) =
         async {
           match message.T with
-          | InventoryItemCreated p -> db.List.Add ({ Id = message.Id; Name = p.Name })
+          | InventoryItemCreated p -> db.List.Add ({ Id = message.EntityId; Name = p.Name })
           | InventoryItemRenamed p ->
-              let item = db.List.Find (fun x -> x.Id = message.Id)
-              db.List.RemoveAll (fun x -> x.Id = message.Id)
+              let item = db.List.Find (fun x -> x.Id = message.EntityId)
+              db.List.RemoveAll (fun x -> x.Id = message.EntityId)
               |> ignore
               db.List.Add ({ item with Name = p.NewName })
           | ItemsRemovedFromInventory _
           | ItemsCheckedInToInventory _ -> ()
           | InventoryItemDeactivated ->
-              db.List.RemoveAll (fun x -> x.Id = message.Id)
+              db.List.RemoveAll (fun x -> x.Id = message.EntityId)
               |> ignore
-
-          return Ok ()
         }
-
-    member __.Handle (_: GetInventoryItems): Async<InventoryItemListDto list> = async { return db.List |> Seq.toList }
+    interface IQueryHandler<GetInventoryItems,InventoryItemListDto list> with
+      member __.Handle (_: GetInventoryItems): Async<Option<InventoryItemListDto list>> = async { return db.List |> Seq.toList |> Some }
 
 module WriteModel =
   open ReadModel
@@ -150,7 +143,9 @@ module WriteModel =
     | CantRemoveNegativeCountFromInventory
     | MustHaveACountGreaterThan0ToAddToInventory
     | AlreadyDeactivated
-
+  /// ICommandHandler for the domain (i.e. known types of commands and errors)
+  type ICommandHandler = interface inherit ICommandHandler<Command,ErrorT> end
+  type ISession = interface inherit ISession<Event> end
   type InventoryItem =
     { Id: Guid
       Version: int
@@ -186,7 +181,6 @@ module WriteModel =
         Error AlreadyDeactivated
       else
         Ok ({ this with Activated = false }, [ InventoryItemDeactivated ])
-
   type InventoryCommandHandlers (session: ISession, now: unit -> DateTimeOffset) =
     let sessionPutNextAndEvents applied =
       let timestamp = now ()
@@ -222,5 +216,5 @@ module WriteModel =
         | RenameInventoryItem p -> return! sessionItemOver (fun item -> item.ChangeName (p.NewName))
       }
 
-    interface ICommandHandler<Command, ErrorT> with
+    interface ICommandHandler with
       member __.Handle (message) = handle message
