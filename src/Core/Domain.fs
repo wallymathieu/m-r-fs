@@ -129,9 +129,8 @@ module WriteModel =
   type InventoryItem =
     { Activated: bool }
 
-    static member Create (id: Guid, name: string) =
-      let item = { Id = id; Version = 0; Instance={Activated = false;} }
-      item, [ InventoryItemCreated { Name = name } ]
+    static member Create (name: string) =
+      {Activated = false;}, [ InventoryItemCreated { Name = name } ]
 
     member this.ChangeName (newName: string) =
       if String.IsNullOrEmpty (newName) then
@@ -178,7 +177,8 @@ module WriteModel =
         match command with
         | CheckInItemsToInventory p -> return! sessionItemOver (fun item -> item.CheckIn (p.Count))
         | CreateInventoryItem p ->
-            do! session.Put (InventoryItem.Create (id, p.Name))
+            let (item, evts) = InventoryItem.Create p.Name
+            do! session.Add (id, item, evts)
             do! session.Commit ()
             return Ok ()
         | DeactivateInventoryItem -> return! sessionItemOver (fun item -> item.Deactivate ())

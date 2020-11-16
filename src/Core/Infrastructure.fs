@@ -88,8 +88,8 @@ type Session(repo:IRepository)=
 [<AutoOpen>]
 module Session=
   type ISession<'TEvent> with
-    member self.Add ( instance:'T, events:'TEvent seq):Async<unit> = async{
-      let aggregate = { Id=Guid.NewGuid(); Version=0; Instance=instance }
+    member self.Add (id:Guid, instance:'T, events:'TEvent seq):Async<unit> = async{
+      let aggregate = { Id=id; Version=0; Instance=instance }
       do! self.Put (aggregate,events)    
     }
 
