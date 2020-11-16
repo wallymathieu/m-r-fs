@@ -23,21 +23,21 @@ type InventoryItemController (logger : ILogger<InventoryItemController>,
 
     [<HttpPost>]
     member self.Post([<FromBody>] model) =
-      commandHandler.Handle({ Id=Guid.NewGuid(); ExpectedVersion=0; T=CreateInventoryItem model })
+      commandHandler.Handle({ Id=Guid.NewGuid(); ExpectedVersion=0; Command=CreateInventoryItem model })
         |> self.BindReturnCommandResult
     [<HttpPost("{id}/{version}")>]
     member self.Put(id, version,[<FromBody>] model) =
-      commandHandler.Handle({ Id=id; ExpectedVersion=version; T=RenameInventoryItem model })
+      commandHandler.Handle({ Id=id; ExpectedVersion=version; Command=RenameInventoryItem model })
         |> self.BindReturnCommandResult
     [<HttpPost("{id}/{version}/DeActivate")>]
     member self.PostDeactivate(id, version) =
-      commandHandler.Handle({ Id=id; ExpectedVersion=version; T=DeactivateInventoryItem })
+      commandHandler.Handle({ Id=id; ExpectedVersion=version; Command=DeactivateInventoryItem })
         |> self.BindReturnCommandResult
     [<HttpPost("{id}/{version}/CheckIn")>]
     member self.PostCheckIn(id, version,[<FromBody>] model) =
-      commandHandler.Handle({ Id=id; ExpectedVersion=version; T=CheckInItemsToInventory model })
+      commandHandler.Handle({ Id=id; ExpectedVersion=version; Command=CheckInItemsToInventory model })
         |> self.BindReturnCommandResult
     [<HttpDelete("{id}/{version}")>]
     member self.DeleteRemove(id, version,[<FromBody>] model) =
-      commandHandler.Handle({ Id=id; ExpectedVersion=version; T=RemoveItemsFromInventory model })
+      commandHandler.Handle({ Id=id; ExpectedVersion=version; Command=RemoveItemsFromInventory model })
         |> self.BindReturnCommandResult

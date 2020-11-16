@@ -14,43 +14,66 @@ type IQuery<'Result> =
 
 type ICommand =
   inherit IMessage
-
-type IHandler<'TMessage, 'TResult, 'TError when 'TMessage :> IMessage> =
-  abstract Handle: 'TMessage -> Async<Result<'TResult,'TError>>
+type Command<'TCommand> =
+  { Id: Guid
+    ExpectedVersion: int
+    Command: 'TCommand }
+  interface ICommand
 
 type IEvent =
   inherit IMessage
   abstract EntityId: Guid
   abstract EntityVersion: int
   abstract EventTimeStamp: DateTimeOffset
+  abstract EventData: obj
+type Event<'T> =
+    { EntityId: Guid
+      EntityVersion: int
+      EventTimeStamp: DateTimeOffset
+      EventData: 'T }
+    interface IEvent with
+      member e.EntityId = e.EntityId
+      member e.EntityVersion = e.EntityVersion
+      member e.EventTimeStamp = e.EventTimeStamp
+      member e.EventData = box e.EventData
 
 /// An event listener is supposed to a passive listener for events
-type IEventListener<'TEvent when 'TEvent :> IEvent> =
-  abstract Handle: 'TEvent -> Async<unit>
+type IEventListener<'TEvent> =
+  abstract Handle: Event<'TEvent> -> Async<unit>
 
-type IEventPublisher<'TEvent when 'TEvent :> IEvent> =
-  abstract Publish: 'TEvent -> Async<unit>
-type IEventStore<'TEvent when 'TEvent :> IEvent> =
-  abstract Save: 'TEvent seq -> Async<unit>
-  abstract Get: id:Guid -> 'TEvent seq option
+type IEventPublisher<'TEvent> =
+  abstract Publish: Event<'TEvent> -> Async<unit>
+type IEventStore<'TEvent> =
+  abstract Save: Event<'TEvent> seq -> Async<unit>
+  abstract Get: id:Guid -> Event<'TEvent> seq option
 
 /// a command handler takes a command returns unit on success and returns an error on failure
-type ICommandHandler<'TCommand, 'TError when 'TCommand :> ICommand> =
-  inherit IHandler<'TCommand, unit, 'TError>
+type ICommandHandler<'TCommand, 'TError> =
+  abstract Handle: Command<'TCommand> -> Async<Result<unit,'TError>>
 
 /// a query handler takes a query returns the result of the query on success and returns an error on failure 
 type IQueryHandler<'TQuery, 'TQueryResult when 'TQuery :> IQuery<'TQueryResult>> =
   abstract Handle: 'TQuery -> Async<'TQueryResult option>
 
 
-type IAggregateRoot =
-  abstract Id: Guid
-  abstract Version: int
+type WithIdAndVersion<'T> = {
+  Id: Guid
+  Version: int
+  Instance:'T
+}
 
-type ISession<'TEvent when 'TEvent :> IEvent> =
-  abstract Put<'T when 'T :> IAggregateRoot> : aggregate:'T * events:'TEvent seq->Async<unit>
+module Event =
+  let create (timestamp: DateTimeOffset) (item: WithIdAndVersion<_>) t =
+    { EntityId = item.Id
+      EntityVersion = item.Version
+      EventTimeStamp = timestamp
+      EventData = t }
+      
+type ISession<'TEvent> =
+  abstract Put : aggregate:WithIdAndVersion<'T> * events:'TEvent seq->Async<unit>
+  //abstract Add : aggregate:'T * events:'TEvent seq->Async<unit>
 
-  abstract Get<'T when 'T :> IAggregateRoot> : aggregateId:Guid * expectedVersion:int option -> Async<'T option>
+  abstract Get : aggregateId:Guid * expectedVersion:int option -> Async<WithIdAndVersion<'T> option>
   abstract Commit: unit -> Async<unit>
 
 (*type IRepository=
@@ -62,6 +85,13 @@ type Session(repo:IRepository)=
     member __.Put(aggregate,events)=async.Return ()
     member __.Get(aggregate,events)=async.Return ()
     *)
+[<AutoOpen>]
+module Session=
+  type ISession<'TEvent> with
+    member self.Add ( instance:'T, events:'TEvent seq):Async<unit> = async{
+      let aggregate = { Id=Guid.NewGuid(); Version=0; Instance=instance }
+      do! self.Put (aggregate,events)    
+    }
 
 type AsyncResult<'T,'E> = ResultT<Async<Result<'T,'E>>>
 module AsyncResult=
@@ -76,56 +106,3 @@ type AsyncResultBuilder () =
   member inline __.Zero () = ResultT (async.Return <| Ok ())                     : AsyncResult<unit,_>
   member inline __.Delay (expr: _->AsyncResult<'T,_>) = Delay.Invoke expr        : AsyncResult<'T,_>
 
-type FakeSession<'TEvent when 'TEvent :> IEvent>(eventStore:IEventStore<'TEvent>)=
-  let current = Collections.Generic.Dictionary<Guid,IAggregateRoot>()
-  let versions = Collections.Generic.Dictionary<Guid*int,IAggregateRoot>()
-  interface ISession<'TEvent> with
-      member __.Put(aggregate,events)=async{
-        do! eventStore.Save events
-        versions.[(aggregate.Id,aggregate.Version)] <- aggregate
-        current.[aggregate.Id] <- aggregate
-      }
-      member __.Get<'T when 'T :> IAggregateRoot>(id,maybeVersion)=async{
-        match maybeVersion with
-        | None ->
-          return Dict.tryGetValue id current |> Option.map (fun v-> downcast v : 'T)
-        | Some version ->
-          return Dict.tryGetValue (id,version) versions |> Option.map (fun v-> downcast v : 'T)
-      }
-      member __.Commit() = async.Return()
-module FakeEventStore=
-  type ConcurrencyException()=
-    inherit Exception()
-open FakeEventStore
-type FakeEventStore<'TEvent when 'TEvent :> IEvent>(publisher:IEventPublisher<'TEvent>)=
-  let current = Collections.Generic.Dictionary<Guid,ResizeArray<'TEvent>>()
-  let saveEvent (event:'TEvent)=async{
-    let expectedVersion = event.EntityVersion
-    match Dict.tryGetValue event.EntityId current with
-    | Some events when 
-                events.[events.Count - 1].EntityVersion <> expectedVersion->
-                raise <| ConcurrencyException()
-    | Some events ->
-      events.Add(event)
-    | None ->
-      let events=ResizeArray()
-      current.Add(event.EntityId, events)
-      events.Add(event)
-    
-    do! publisher.Publish event
-  }
-
-  interface IEventStore<'TEvent> with
-    member __.Save(events)=async{
-      for event in events do
-        do! saveEvent event
-    }
-    member __.Get(id)=
-      Dict.tryGetValue id current |> Option.map (fun evts-> upcast evts)
-    
-type FakeEventPublisher<'TEvent when 'TEvent :> IEvent>(listeners : IEventListener<'TEvent> seq)=
-  interface IEventPublisher<'TEvent> with
-    member __.Publish(event)=async{
-      for listener in listeners do
-        do! listener.Handle event
-    }

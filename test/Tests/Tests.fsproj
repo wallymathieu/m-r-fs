@@ -8,7 +8,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="Tests.fs" />
+    <Compile Include="Helpers.fs" />
+    <Compile Include="WhenItemCreated.fs" />
+    <Compile Include="WhenItemCheckedIn.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
@@ -23,6 +25,10 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Core\Core.fsproj" />
   </ItemGroup>
 
 </Project>

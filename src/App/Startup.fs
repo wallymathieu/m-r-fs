@@ -5,6 +5,7 @@ open System.Collections.Generic
 open System.Linq
 open System.Text.Json.Serialization
 open System.Threading.Tasks
+open CQRSLite.Core
 open CQRSLite.Core.Domain.ReadModel
 open CQRSLite.Core.Domain.WriteModel
 open CQRSLite.Core.Infrastructure
@@ -18,9 +19,6 @@ open Microsoft.Extensions.Hosting
 
 type Startup(configuration: IConfiguration) =
     let dateTimeOffsetNow= fun ()->DateTimeOffset.UtcNow
-    let registerInventoryCommandHandlers (di:IServiceProvider)=
-      InventoryCommandHandlers(di.GetRequiredService<_>(),dateTimeOffsetNow)
-      :>ICommandHandler
     member _.Configuration = configuration
 
     // This method gets called by the runtime. Use this method to add services to the container.
@@ -35,12 +33,13 @@ type Startup(configuration: IConfiguration) =
                 .AddSingleton<IQueryHandler<GetInventoryItemDetails,InventoryItemDetailsDto>>(fun di->di.GetRequiredService<InventoryItemDetailView>() :> IQueryHandler<GetInventoryItemDetails,InventoryItemDetailsDto>)
                 .AddSingleton<IQueryHandler<GetInventoryItems,InventoryItemListDto list>>(fun di->di.GetRequiredService<InventoryListView>() :> IQueryHandler<GetInventoryItems,InventoryItemListDto list>)
                 .AddSingleton<InMemoryDatabase>(InMemoryDatabase.Default())
-                .AddSingleton<ICommandHandler>(registerInventoryCommandHandlers)
-                .AddSingleton<ISession, FakeSession<Event>>()
-                .AddSingleton<IEventStore<Event>, FakeEventStore<Event>>()
-                .AddSingleton<IEventPublisher<Event>, FakeEventPublisher<Event>>()
-                .AddSingleton<IEventListener<Event>>(fun di->di.GetRequiredService<InventoryItemDetailView>() :> IEventListener<Event>)
-                .AddSingleton<IEventListener<Event>>(fun di->di.GetRequiredService<InventoryListView>() :> IEventListener<Event>)
+                .AddSingleton<ICommandHandler, InventoryCommandHandlers>()
+                .AddSingleton(dateTimeOffsetNow)
+                .AddSingleton<ISession, Fakes.Session<EventsT>>()
+                .AddSingleton<IEventStore<EventsT>, Fakes.EventStore<EventsT>>()
+                .AddSingleton<IEventPublisher<EventsT>, Fakes.EventPublisher<EventsT>>()
+                .AddSingleton<IEventListener<EventsT>>(fun di->di.GetRequiredService<InventoryItemDetailView>() :> IEventListener<EventsT>)
+                .AddSingleton<IEventListener<EventsT>>(fun di->di.GetRequiredService<InventoryListView>() :> IEventListener<EventsT>)
                 |> SwaggerConfig.configureServices
                 |> ignore
     

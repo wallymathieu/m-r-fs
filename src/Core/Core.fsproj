@@ -10,6 +10,7 @@
   <ItemGroup>
     <Compile Include="Infrastructure.fs" />
     <Compile Include="Domain.fs" />
+    <Compile Include="Fakes.fs" />
     <PackageReference Include="FSharpPlus" Version="1.1.3" />
   </ItemGroup>
 

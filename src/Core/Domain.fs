@@ -36,27 +36,11 @@ module ReadModel =
     | ItemsCheckedInToInventory of WithCount
     | ItemsRemovedFromInventory of WithCount
 
-  type Event =
-    { EntityId: Guid
-      EntityVersion: int
-      EventTimeStamp: DateTimeOffset
-      T: EventsT }
-    interface IEvent with
-      member e.EntityId = e.EntityId
-      member e.EntityVersion = e.EntityVersion
-      member e.EventTimeStamp = e.EventTimeStamp
 
-  module Event =
-
-    let create (timestamp: DateTimeOffset) (item: #IAggregateRoot) (t: EventsT) =
-      { EntityId = item.Id
-        EntityVersion = item.Version
-        EventTimeStamp = timestamp
-        T = t }
 
   open System.Collections.Generic
   let raiseCouldNotFindOriginalInventory ()=
-    raise <| InvalidOperationException "did not find the original inventory (this shouldnt happen)"
+    raise <| InvalidOperationException "did not find the original inventory (this shouldn't happen)"
   type InMemoryDatabase =
     { Details: Dictionary<Guid, InventoryItemDetailsDto>
       List: ResizeArray<InventoryItemListDto> }
@@ -70,10 +54,10 @@ module ReadModel =
     static member Default ()={ Details= Dictionary<_, _>(); List= ResizeArray<_>() }
 
   type InventoryItemDetailView (db: InMemoryDatabase) =
-    interface IEventListener<Event> with
+    interface IEventListener<EventsT> with
       member __.Handle (message) =
         async {
-          match message.T with
+          match message.EventData with
           | InventoryItemCreated p ->
               db.Details.Add
                 (message.EntityId,
@@ -104,10 +88,10 @@ module ReadModel =
         async { return db.TryGetDetail message.Id }
 
   type InventoryListView (db: InMemoryDatabase) =
-    interface IEventListener<Event> with
+    interface IEventListener<EventsT> with
       member __.Handle (message) =
         async {
-          match message.T with
+          match message.EventData with
           | InventoryItemCreated p -> db.List.Add ({ Id = message.EntityId; Name = p.Name })
           | InventoryItemRenamed p ->
               let item = db.List.Find (fun x -> x.Id = message.EntityId)
@@ -133,12 +117,6 @@ module WriteModel =
     | RemoveItemsFromInventory of WithCount
     | RenameInventoryItem of WithNewName
 
-  type Command =
-    { Id: Guid
-      ExpectedVersion: int
-      T: CommandT }
-    interface ICommand
-
   type ErrorT =
     | MissingItem
     | MissingName
@@ -146,25 +124,20 @@ module WriteModel =
     | MustHaveACountGreaterThan0ToAddToInventory
     | AlreadyDeactivated
   /// ICommandHandler for the domain (i.e. known types of commands and errors)
-  type ICommandHandler = ICommandHandler<Command,ErrorT>
-  type ISession = ISession<Event>
+  type ICommandHandler = ICommandHandler<CommandT,ErrorT>
+  type ISession = ISession<EventsT>
   type InventoryItem =
-    { Id: Guid
-      Version: int
-      Activated: bool }
-    interface IAggregateRoot with
-      member x.Id = x.Id
-      member x.Version = x.Version
+    { Activated: bool }
 
     static member Create (id: Guid, name: string) =
-      let item: InventoryItem = { Id = id; Activated = false; Version = 0 }
+      let item = { Id = id; Version = 0; Instance={Activated = false;} }
       item, [ InventoryItemCreated { Name = name } ]
 
     member this.ChangeName (newName: string) =
       if String.IsNullOrEmpty (newName) then
         Error MissingName
       else
-        Ok ({this with Version=this.Version+1}, [ InventoryItemRenamed { NewName = newName } ])
+        Ok (this, [ InventoryItemRenamed { NewName = newName } ])
 
     member this.Remove (count: int) =
       if count <= 0 then
@@ -182,24 +155,19 @@ module WriteModel =
       if not this.Activated then
         Error AlreadyDeactivated
       else
-        Ok ({ this with Activated = false; Version=this.Version+1 }, [ InventoryItemDeactivated ])
-  type InventoryCommandHandlers (session: ISession, now: unit -> DateTimeOffset) =
-    let sessionPutNextAndEvents applied =
-      let timestamp = now ()
-      let (next, evts) = applied
-      let toFullEvent = Event.create timestamp next
-      session.Put (next, List.map toFullEvent evts)
+        Ok (this, [ InventoryItemDeactivated ])
+  type InventoryCommandHandlers (session: ISession) =
 
-    let handle (message: Command) =
+    let handle ({Id=id;ExpectedVersion=expectedVersion; Command=command}) =
       /// try to fetch item from session
       /// the "apply" use the item to yield the next entity value and events
       let sessionItemOver apply =
         async {
-          match! session.Get<InventoryItem> (message.Id, Some message.ExpectedVersion) with
-          | Some (item: InventoryItem) ->
+          match! session.Get<InventoryItem> (id, Some expectedVersion) with
+          | Some ({Instance= item} as c) ->
               match apply item with
-              | Ok next_evts ->
-                  do! sessionPutNextAndEvents next_evts
+              | Ok (next, evts) ->
+                  do! session.Put ({ c with Instance = next },evts)
                   do! session.Commit ()
                   return Ok ()
               | Error e -> return Error e
@@ -207,10 +175,10 @@ module WriteModel =
         }
 
       async {
-        match message.T with
+        match command with
         | CheckInItemsToInventory p -> return! sessionItemOver (fun item -> item.CheckIn (p.Count))
         | CreateInventoryItem p ->
-            do! sessionPutNextAndEvents (InventoryItem.Create (message.Id, p.Name))
+            do! session.Put (InventoryItem.Create (id, p.Name))
             do! session.Commit ()
             return Ok ()
         | DeactivateInventoryItem -> return! sessionItemOver (fun item -> item.Deactivate ())
