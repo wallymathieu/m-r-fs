@@ -124,7 +124,7 @@ module WriteModel =
     | MustHaveACountGreaterThan0ToAddToInventory
     | AlreadyDeactivated
   /// ICommandHandler for the domain (i.e. known types of commands and errors)
-  type ICommandHandler = ICommandHandler<CommandT,ErrorT>
+  type ICommandHandler = ICommandHandler<CommandT, unit, ErrorT> // note: we use unit here, but you could return something else
   type ISession = ISession<EventsT>
   type InventoryItem =
     { Activated: bool }

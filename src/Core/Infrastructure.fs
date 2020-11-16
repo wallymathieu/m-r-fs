@@ -48,8 +48,8 @@ type IEventStore<'TEvent> =
   abstract Get: id:Guid -> Event<'TEvent> seq option
 
 /// a command handler takes a command returns unit on success and returns an error on failure
-type ICommandHandler<'TCommand, 'TError> =
-  abstract Handle: Command<'TCommand> -> Async<Result<unit,'TError>>
+type ICommandHandler<'TCommand, 'TCommandResult, 'TError> =
+  abstract Handle: Command<'TCommand> -> Async<Result<'TCommandResult,'TError>>
 
 /// a query handler takes a query returns the result of the query on success and returns an error on failure 
 type IQueryHandler<'TQuery, 'TQueryResult when 'TQuery :> IQuery<'TQueryResult>> =
